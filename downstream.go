@@ -1308,26 +1308,16 @@ func unmarshalUsername(rawUsername string) (username, client, network string) {
 func (dc *downstreamConn) authenticate(ctx context.Context, username, password string) error {
 	username, clientName, networkName := unmarshalUsername(username)
 
-	u, err := dc.srv.db.GetUser(ctx, username)
+	srhtAuth, err := checkSrhtToken(ctx, password)
 	if err != nil {
-		return newInvalidUsernameOrPasswordError(fmt.Errorf("user not found: %w", err))
+		return err
 	}
 
-	upgraded, err := u.CheckPassword(password)
+	dc.user, err = getOrCreateSrhtUser(ctx, dc.srv, srhtAuth)
 	if err != nil {
-		return newInvalidUsernameOrPasswordError(err)
+		return err
 	}
 
-	if upgraded {
-		if err := dc.srv.db.StoreUser(ctx, u); err != nil {
-			return err
-		}
-	}
-
-	dc.user = dc.srv.getUser(username)
-	if dc.user == nil {
-		return fmt.Errorf("user exists in the DB but hasn't been loaded by the bouncer -- a restart may help")
-	}
 	dc.clientName = clientName
 	dc.registration.networkName = networkName
 	return nil

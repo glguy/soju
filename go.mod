@@ -9,6 +9,8 @@ require (
 	github.com/emersion/go-sasl v0.0.0-20211008083017-0b9dcfb154ac
 	github.com/klauspost/compress v1.15.6 // indirect
 	github.com/lib/pq v1.10.6
+	github.com/machinebox/graphql v0.2.2
+	github.com/matryer/is v1.4.0 // indirect
 	github.com/mattn/go-sqlite3 v1.14.13
 	github.com/pires/go-proxyproto v0.6.2
 	github.com/prometheus/client_golang v1.12.2
