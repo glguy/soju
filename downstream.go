@@ -298,6 +298,7 @@ var passthroughIsupport = map[string]bool{
 
 type downstreamSASL struct {
 	server                       sasl.Server
+	mechanism                    string
 	plainUsername, plainPassword string
 	pendingResp                  bytes.Buffer
 }
@@ -366,7 +367,7 @@ func newDownstreamConn(srv *Server, ic ircConn, id uint64) *downstreamConn {
 	for k, v := range permanentDownstreamCaps {
 		dc.caps.Available[k] = v
 	}
-	dc.caps.Available["sasl"] = "PLAIN"
+	dc.caps.Available["sasl"] = "PLAIN,EXTERNAL"
 	// TODO: this is racy, we should only enable chathistory after
 	// authentication and then check that user.msgStore implements
 	// chatHistoryMessageStore
@@ -775,14 +776,41 @@ func (dc *downstreamConn) handleMessageUnregistered(ctx context.Context, msg *ir
 			break
 		}
 
-		if err := dc.authenticate(ctx, credentials.plainUsername, credentials.plainPassword); err != nil {
-			dc.logger.Printf("SASL authentication error for user %q: %v", credentials.plainUsername, err)
-			dc.endSASL(&irc.Message{
-				Prefix:  dc.srv.prefix(),
-				Command: irc.ERR_SASLFAIL,
-				Params:  []string{dc.nick, authErrorReason(err)},
-			})
-			break
+		switch credentials.mechanism {
+		case "PLAIN":
+			if err := dc.authenticate(ctx, credentials.plainUsername, credentials.plainPassword); err != nil {
+				dc.logger.Printf("SASL authentication error for user %q: %v", credentials.plainUsername, err)
+				dc.endSASL(&irc.Message{
+					Prefix:  dc.srv.prefix(),
+					Command: irc.ERR_SASLFAIL,
+					Params:  []string{dc.nick, authErrorReason(err)},
+				})
+				return nil
+			}
+		case "EXTERNAL":
+			authConn, ok := dc.conn.conn.(srhtAuthIRCConn)
+			if !ok {
+				dc.endSASL(&irc.Message{
+					Prefix:  dc.srv.prefix(),
+					Command: irc.ERR_SASLFAIL,
+					Params:  []string{dc.nick, "You are not logged in with your sr.ht account"},
+				})
+				return nil
+			}
+
+			var err error
+			dc.user, err = getOrCreateSrhtUser(ctx, dc.srv, authConn.auth)
+			if err != nil {
+				dc.logger.Printf("failed to get/create sr.ht user %q: %v", authConn.auth.Username, err)
+				dc.endSASL(&irc.Message{
+					Prefix:  dc.srv.prefix(),
+					Command: irc.ERR_SASLFAIL,
+					Params:  []string{dc.nick, authErrorReason(err)},
+				})
+				return nil
+			}
+		default:
+			panic(fmt.Errorf("Unexpected SASL mechanism %q", credentials.mechanism))
 		}
 
 		// Technically we should send RPL_LOGGEDIN here. However we use
@@ -998,6 +1026,10 @@ func (dc *downstreamConn) handleAuthenticateCommand(msg *irc.Message) (result *d
 				dc.sasl.plainPassword = password
 				return nil
 			}))
+		case "EXTERNAL":
+			server = sasl.NewExternalServer(func(identity string) error {
+				return nil
+			})
 		default:
 			return nil, ircError{&irc.Message{
 				Prefix:  dc.srv.prefix(),
@@ -1006,7 +1038,7 @@ func (dc *downstreamConn) handleAuthenticateCommand(msg *irc.Message) (result *d
 			}}
 		}
 
-		dc.sasl = &downstreamSASL{server: server}
+		dc.sasl = &downstreamSASL{server: server, mechanism: mech}
 	} else {
 		chunk := msg.Params[0]
 		if chunk == "+" {
