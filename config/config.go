@@ -67,6 +67,10 @@ type Auth struct {
 	Driver, Source string
 }
 
+type FileUpload struct {
+	Driver, Source string
+}
+
 type Server struct {
 	Listen   []string
 	TLS      *TLS
@@ -74,9 +78,10 @@ type Server struct {
 	Title    string
 	MOTDPath string
 
-	DB       DB
-	MsgStore MsgStore
-	Auth     Auth
+	DB         DB
+	MsgStore   MsgStore
+	Auth       Auth
+	FileUpload *FileUpload
 
 	HTTPOrigins    []string
 	AcceptProxyIPs IPSet
@@ -174,6 +179,18 @@ func parse(cfg scfg.Block) (*Server, error) {
 				}
 			default:
 				return nil, fmt.Errorf("directive %q: unknown driver %q", d.Name, srv.Auth.Driver)
+			}
+		case "file-upload":
+			if err := d.ParseParams(&srv.FileUpload.Driver); err != nil {
+				return nil, err
+			}
+			switch srv.FileUpload.Driver {
+			case "fs":
+				if err := d.ParseParams(nil, &srv.MsgStore.Source); err != nil {
+					return nil, err
+				}
+			default:
+				return nil, fmt.Errorf("directive %q: unknown driver %q", d.Name, srv.FileUpload.Driver)
 			}
 		case "http-origin":
 			srv.HTTPOrigins = d.Params
