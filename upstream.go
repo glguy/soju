@@ -483,6 +483,12 @@ func (uc *upstreamConn) abortPendingCommands() {
 					Command: irc.RPL_ENDOFWHOIS,
 					Params:  []string{dc.nick, nick, "Command aborted"},
 				})
+			case "WHOWAS":
+				nick := pendingCmd.msg.Params[0]
+				dc.SendMessage(ctx, &irc.Message{
+					Command: irc.RPL_ENDOFWHOWAS,
+					Params:  []string{dc.nick, nick, "Command aborted"},
+				})
 			case "AUTHENTICATE":
 				dc.endSASL(ctx, &irc.Message{
 					Command: irc.ERR_SASLABORTED,
@@ -513,7 +519,7 @@ func (uc *upstreamConn) sendNextPendingCommand(cmd string) {
 
 func (uc *upstreamConn) enqueueCommand(dc *downstreamConn, msg *irc.Message) {
 	switch msg.Command {
-	case "LIST", "WHO", "WHOIS", "AUTHENTICATE", "REGISTER", "VERIFY":
+	case "LIST", "WHO", "WHOIS", "WHOWAS", "AUTHENTICATE", "REGISTER", "VERIFY":
 		// Supported
 	default:
 		panic(fmt.Errorf("Unsupported pending command %q", msg.Command))
@@ -1593,6 +1599,11 @@ func (uc *upstreamConn) handleMessage(ctx context.Context, msg *irc.Message) err
 		dc.SendMessage(ctx, msg)
 	case xirc.RPL_WHOISCERTFP, xirc.RPL_WHOISREGNICK, irc.RPL_WHOISUSER, irc.RPL_WHOISSERVER, irc.RPL_WHOISCHANNELS, irc.RPL_WHOISOPERATOR, irc.RPL_WHOISIDLE, xirc.RPL_WHOISSPECIAL, xirc.RPL_WHOISACCOUNT, xirc.RPL_WHOISTEXT, xirc.RPL_WHOISACTUALLY, xirc.RPL_WHOISHOST, xirc.RPL_WHOISMODES, xirc.RPL_WHOISSECURE:
 		dc, cmd := uc.currentPendingCommand("WHOIS")
+
+		if dc == nil || cmd == nil {
+		        dc, cmd = uc.currentPendingCommand("WHOWAS")
+		}
+
 		if cmd == nil {
 			return fmt.Errorf("unexpected WHOIS reply %q: no matching pending WHOIS", msg.Command)
 		} else if dc == nil {
@@ -1604,6 +1615,15 @@ func (uc *upstreamConn) handleMessage(ctx context.Context, msg *irc.Message) err
 		dc, cmd := uc.dequeueCommand("WHOIS")
 		if cmd == nil {
 			return fmt.Errorf("unexpected RPL_ENDOFWHOIS: no matching pending WHOIS")
+		} else if dc == nil {
+			return nil
+		}
+
+		dc.SendMessage(ctx, msg)
+	case irc.RPL_ENDOFWHOWAS:
+		dc, cmd := uc.dequeueCommand("WHOWAS")
+		if cmd == nil {
+			return fmt.Errorf("unexpected RPL_ENDOFWHOWAS: no matching pending WHOWAS")
 		} else if dc == nil {
 			return nil
 		}

@@ -2003,85 +2003,12 @@ func (dc *downstreamConn) handleMessageRegistered(ctx context.Context, msg *irc.
 
 		uc.SendMessageLabeled(ctx, dc.id, msg)
 	case "MODE":
-		var name string
-		if err := parseMessageParams(msg, &name); err != nil {
-			return err
-		}
-
-		var modeStr string
-		if len(msg.Params) > 1 {
-			modeStr = msg.Params[1]
-		}
-
-		if dc.casemap(name) == dc.nickCM {
-			if modeStr != "" {
-				uc, err := dc.upstreamForCommand(msg.Command)
-				if err != nil {
-					return err
-				}
-				uc.SendMessageLabeled(ctx, dc.id, msg)
-			} else {
-				var userMode string
-				if uc := dc.upstream(); uc != nil {
-					userMode = string(uc.modes)
-				}
-
-				dc.SendMessage(ctx, &irc.Message{
-					Command: irc.RPL_UMODEIS,
-					Params:  []string{dc.nick, "+" + userMode},
-				})
-			}
-			return nil
-		}
-
 		uc, err := dc.upstreamForCommand(msg.Command)
 		if err != nil {
 			return err
 		}
 
-		if !uc.isChannel(name) {
-			return ircError{&irc.Message{
-				Command: irc.ERR_USERSDONTMATCH,
-				Params:  []string{dc.nick, "Cannot change mode for other users"},
-			}}
-		}
-
-		if modeStr != "" {
-			params := []string{name, modeStr}
-			params = append(params, msg.Params[2:]...)
-			uc.SendMessageLabeled(ctx, dc.id, &irc.Message{
-				Command: "MODE",
-				Params:  params,
-			})
-		} else {
-			ch := uc.channels.Get(name)
-			if ch == nil {
-				// we're not on that channel, pass command to upstream
-				uc.SendMessageLabeled(ctx, dc.id, msg)
-				return nil
-			}
-
-			if ch.modes == nil {
-				// we haven't received the initial RPL_CHANNELMODEIS yet
-				// ignore the request, we will broadcast the modes later when we receive RPL_CHANNELMODEIS
-				return nil
-			}
-
-			modeStr, modeParams := ch.modes.Format()
-			params := []string{dc.nick, name, modeStr}
-			params = append(params, modeParams...)
-
-			dc.SendMessage(ctx, &irc.Message{
-				Command: irc.RPL_CHANNELMODEIS,
-				Params:  params,
-			})
-			if ch.creationTime != "" {
-				dc.SendMessage(ctx, &irc.Message{
-					Command: xirc.RPL_CREATIONTIME,
-					Params:  []string{dc.nick, name, ch.creationTime},
-				})
-			}
-		}
+		uc.SendMessageLabeled(ctx, dc.id, msg)
 	case "TOPIC":
 		var name string
 		if err := parseMessageParams(msg, &name); err != nil {
@@ -2325,6 +2252,13 @@ func (dc *downstreamConn) handleMessageRegistered(ctx context.Context, msg *irc.
 			return nil
 		}
 
+		uc, err := dc.upstreamForCommand(msg.Command)
+		if err != nil {
+			return err
+		}
+
+		uc.enqueueCommand(dc, msg)
+	case "WHOWAS":
 		uc, err := dc.upstreamForCommand(msg.Command)
 		if err != nil {
 			return err
